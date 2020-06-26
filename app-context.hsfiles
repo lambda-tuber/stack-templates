@@ -1,0 +1,691 @@
+{-# START_FILE package.yaml #-}
+name:                {{name}}
+version:             0.0.1.0
+github:              "githubuser/{{name}}"
+license:             BSD3
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2020 Author name here"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/githubuser/{{name}}#readme>
+
+ghc-options:
+- -Wall
+- -fno-warn-unused-do-bind
+- -fno-warn-name-shadowing
+- -fno-warn-orphans
+- -Wcompat
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wredundant-constraints
+
+default-extensions:
+- BangPatterns
+- BinaryLiterals
+- ConstraintKinds
+- DataKinds
+- DefaultSignatures
+- DeriveDataTypeable
+- DeriveFoldable
+- DeriveFunctor
+- DeriveGeneric
+- DeriveTraversable
+- DoAndIfThenElse
+- EmptyDataDecls
+- ExistentialQuantification
+- FlexibleContexts
+- FlexibleInstances
+- FunctionalDependencies
+- GADTs
+- GeneralizedNewtypeDeriving
+- InstanceSigs
+- KindSignatures
+- LambdaCase
+- MultiParamTypeClasses
+- MultiWayIf
+- NamedFieldPuns
+- OverloadedLabels
+- PartialTypeSignatures
+- PatternGuards
+- PolyKinds
+- RankNTypes
+- RecordWildCards
+- ScopedTypeVariables
+- StandaloneDeriving
+- TupleSections
+- TypeFamilies
+- TypeOperators
+- TypeSynonymInstances
+- ViewPatterns
+
+dependencies:
+- base >= 4.7 && < 5
+- safe-exceptions
+- optparse-applicative
+- lens
+- data-default
+- aeson
+- yaml
+- conduit
+- bytestring
+- text
+- monad-logger
+- fast-logger
+- mtl
+- monad-control
+- lifted-base
+- transformers-base
+
+library:
+  source-dirs: src
+  # exposed-modules:
+  # - {{name-as-module}}.Control
+
+executables:
+  {{name}}:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - {{name}}
+
+tests:
+  {{name}}-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - {{name}}
+    - hspec
+
+
+{-# START_FILE Setup.hs #-}
+import Distribution.Simple
+main = defaultMain
+
+
+{-# START_FILE app/Main.hs #-}
+module Main where
+
+import System.Exit
+import Options.Applicative
+import qualified Control.Exception.Safe as E
+
+import {{name-as-module}}.Control
+
+-- |
+--
+main :: IO ()
+main = getArgs >>= \args -> do
+       flip E.catchAny exception
+     $ flip E.finally  finalize
+     $ run args
+
+  where
+    finalize = do
+      return ()
+
+    exception e = do
+      putStrLn "-----------------------------------------------------------------------------"
+      putStrLn "ERROR exit."
+      print e
+      putStrLn "-----------------------------------------------------------------------------"
+      exitFailure
+
+-------------------------------------------------------------------------------
+-- |
+--   optparse-applicative
+--
+getArgs :: IO ArgData
+getArgs = execParser parseInfo
+
+-- |
+--
+parseInfo :: ParserInfo ArgData
+parseInfo = info options $ mconcat
+  [ fullDesc
+  , header   "This is app program."
+  , footer   "Copyright 2020. All Rights Reserved."
+  , progDesc "This is app program description."
+  ]
+
+-- |
+--
+options :: Parser ArgData
+options = (<*>) helper
+  $ ArgData
+  <$> confOption
+
+-- |
+--
+confOption :: Parser (Maybe FilePath)
+confOption = optional $ strOption $ mconcat
+  [ short 'y', long "yaml"
+  , help "config file"
+  , metavar "FILE"
+  ]
+
+
+
+{-# START_FILE src/{{name-as-module}}/Application.hs #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+module {{name-as-module}}.Application (
+    app
+  ) where
+
+import Control.Monad.Logger
+import Control.Monad.Reader
+import qualified Data.Text as T
+
+import {{name-as-module}}.Type
+import {{name-as-module}}.Constant
+import qualified {{name-as-module}}.Utility as U
+
+
+-- |
+--
+app :: AppContext ()
+app = do
+  lv <- _logLevelAppData <$> ask
+  U.liftIOE $ print ("app called." :: String)
+  $logDebugS _LOG_APP "This is a debug log message"
+  $logInfoS  _LOG_APP "This is a info log message"
+  $logWarnS  _LOG_APP "This is a warn log message"
+  $logErrorS _LOG_APP $ "This is a error log message" `T.append` T.pack (show lv)
+
+  return ()
+
+
+{-# START_FILE src/{{name-as-module}}/Constant.hs #-}
+module {{name-as-module}}.Constant where
+
+import qualified Data.Text as T
+import qualified Data.ByteString as B
+import qualified Data.Text.Encoding as T
+
+--------------------------------------------------------------------------------
+-- |
+--
+_LOG_APP :: T.Text
+_LOG_APP = T.pack "APP"
+
+
+-- |
+--
+_TIME_FORMAT :: B.ByteString
+_TIME_FORMAT = T.encodeUtf8 $ T.pack "%Y/%m/%d %T %z"
+
+
+
+{-# START_FILE src/{{name-as-module}}/Control.hs #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+module {{name-as-module}}.Control (
+    ArgData(..)
+  , run
+  ) where
+
+import qualified Control.Exception.Safe as E
+import Data.Default
+import Data.Yaml
+import Control.Lens
+import System.Log.FastLogger
+
+import {{name-as-module}}.Type
+import {{name-as-module}}.Constant
+import qualified {{name-as-module}}.Utility as U
+import qualified {{name-as-module}}.Application as A
+
+-- |
+--
+run :: ArgData -> IO ()
+run args = do
+
+  conf <- maybe (pure def) decodeFileThrow (args^.yamlArgData)
+
+  tcache <- newTimeCache _TIME_FORMAT
+  (logger, finalizeLogger) <- newTimedFastLogger tcache 
+                            $ LogFileNoRotate (conf^.logFileConfigData) defaultBufSize
+
+  let appDat = AppData {
+      _loggerAppData   = logger
+    , _logLevelAppData = conf^.logLevelConfigData
+    }
+
+  U.runApp appDat A.app >>= \case
+    Right _ -> return ()
+    Left er -> E.throwString er
+
+  finalizeLogger
+
+  return ()
+
+
+
+{-# START_FILE src/{{name-as-module}}/Type.hs #-}
+{-# LANGUAGE TemplateHaskell #-}
+
+module {{name-as-module}}.Type where
+
+import Data.Data
+import Data.Default
+import Control.Lens
+import Data.Aeson
+import Data.Aeson.TH
+import Control.Monad.Reader
+import Control.Monad.Logger
+import Control.Monad.Except
+import System.Log.FastLogger
+import qualified Data.Text as T
+import qualified Text.Read as R
+
+--------------------------------------------------------------------------------
+-- |
+--
+instance FromJSON LogLevel where
+  parseJSON (String v) = case R.readEither ("Level" ++ T.unpack v) of
+    Right l -> pure l
+    Left er -> error $ "invalid loglevel. <" ++ T.unpack v ++ "> " ++ er
+  parseJSON o = error $ "json parse error. Priority:" ++ show o
+
+instance ToJSON LogLevel where
+  toJSON LevelDebug     = String $ T.pack "Debug"
+  toJSON (LevelInfo)    = String $ T.pack "Info"
+  toJSON (LevelWarn)    = String $ T.pack "Warn"
+  toJSON (LevelError)   = String $ T.pack "Error"
+  toJSON (LevelOther m) = String m
+
+
+--------------------------------------------------------------------------------
+-- |
+--
+data ArgData = ArgData {
+    _yamlArgData :: Maybe FilePath
+  } deriving (Data, Typeable, Show, Read, Eq)
+
+makeLenses ''ArgData
+$(deriveJSON
+  defaultOptions {
+      fieldLabelModifier = tail . reverse . drop (length "ArgData") . reverse
+    }
+  ''ArgData)
+
+instance Default ArgData where
+  def = ArgData {
+        _yamlArgData = Nothing
+      }
+
+
+--------------------------------------------------------------------------------
+-- |
+--
+data ConfigData = ConfigData {
+    _logFileConfigData :: FilePath
+  , _logLevelConfigData :: LogLevel
+  } deriving (Typeable, Show, Read, Eq)
+
+makeLenses ''ConfigData
+$(deriveJSON
+  defaultOptions {
+      fieldLabelModifier = tail . reverse . drop (length "ConfigData") . reverse
+    }
+  ''ConfigData)
+
+instance Default ConfigData where
+  def = ConfigData {
+        _logFileConfigData  = "{{name}}.log"
+      , _logLevelConfigData = LevelWarn
+      }
+
+
+--------------------------------------------------------------------------------
+-- |
+--
+data AppData = AppData {
+    _loggerAppData   :: TimedFastLogger
+  , _logLevelAppData :: LogLevel
+  }
+
+makeLenses ''AppData
+
+
+--------------------------------------------------------------------------------
+-- |
+--
+type ErrorData = String
+type AppContext = ReaderT AppData (ExceptT ErrorData (LoggingT IO))
+
+
+
+{-# START_FILE src/{{name-as-module}}/Utility.hs #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+module {{name-as-module}}.Utility where
+
+import System.Log.FastLogger
+import Control.Monad.Logger
+import qualified Control.Exception.Safe as E
+import Control.Monad.IO.Class
+import Control.Monad.Except
+import Control.Monad.Reader
+import Control.Lens
+
+import {{name-as-module}}.Type
+
+
+-- |
+--
+runApp :: AppData -> AppContext a -> IO (Either ErrorData a)
+runApp appDat app =
+  runFastLoggerT appDat
+    $ runExceptT
+    $ runReaderT app appDat
+
+
+-- |
+--
+runFastLoggerT :: AppData -> LoggingT IO a -> IO a
+runFastLoggerT appDat app = do
+  let logLevel = appDat^.logLevelAppData
+      logger   = appDat^.loggerAppData
+      
+  runLoggingT (filterLogger (filterByLevel logLevel) app) $ output logger 
+
+  where
+    -- |
+    --
+    output :: TimedFastLogger
+           -> Loc
+           -> LogSource
+           -> LogLevel
+           -> LogStr
+           -> IO ()
+    output logger a b c d = do
+      let msg = defaultLogStr a b c d
+      logger (\ts -> toLogStr ts <> " " <> msg)
+
+    -- |
+    --
+    filterByLevel :: LogLevel -> LogSource -> LogLevel -> Bool
+    filterByLevel target _ actual = actual >= target
+
+
+-- |
+--
+liftIOE :: IO a -> AppContext a
+liftIOE f = liftIO (go f) >>= liftEither
+  where
+    go :: IO b -> IO (Either String b)
+    go f = E.catchAny (Right <$> f) errHdl
+
+    errHdl :: E.SomeException -> IO (Either String a)
+    errHdl = return . Left . show
+
+
+{-# START_FILE test/Spec.hs #-}
+{-# OPTIONS_GHC -F -pgmF hspec-discover #-}
+
+{-# START_FILE test/{{name-as-module}}/UtilitySpec.hs #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE OverloadedStrings #-}
+
+module {{name-as-module}}.UtilitySpec (spec) where
+
+import Test.Hspec
+import Control.Monad.Logger
+import System.Log.FastLogger
+
+import Spec.{{name-as-module}}.Constant
+
+import {{name-as-module}}.Type
+import {{name-as-module}}.Constant
+import qualified {{name-as-module}}.Utility as U
+
+
+-- |
+--
+spec :: Spec
+spec = do
+  runIO $ putStrLn "Start Spec."
+  beforeAll_ setUpOnce
+    . afterAll_ tearDownOnce
+    . before_ setUp
+    . after_  tearDown
+    $ run
+
+  where
+    setUpOnce :: IO ()
+    setUpOnce = do
+      putStrLn "[INFO] すべての試験開始前に1回だけ実施"
+
+    tearDownOnce ::IO ()
+    tearDownOnce = do
+      putStrLn "[INFO] すべての試験終了後に1回だけ実施"
+
+    setUp :: IO ()
+    setUp = do
+      putStrLn "[INFO] 各試験の開始前に実施"
+
+    tearDown :: IO ()
+    tearDown = do
+      putStrLn "[INFO] 各試験の終了後に実施"
+
+-- |
+--
+run :: Spec
+run = do
+  describe "runApp" $ do
+    tcache <- runIO $ newTimeCache _TIME_FORMAT
+    (logger, _) <- runIO $ newTimedFastLogger tcache (LogStderr defaultBufSize)
+    let appDat = AppData {
+        _loggerAppData   = logger
+      , _logLevelAppData = LevelDebug
+      }
+
+    context "when AppData default" $ do
+      it "should be 10" $ do
+        putStrLn "[INFO] 1件目の試験を実施"
+        (Right v) <- U.runApp appDat app10
+        10 `shouldBe` v
+
+      it "should exception catched" $ do
+        putStrLn "[INFO] 2件目の試験を実施"
+        (Left e) <- U.runApp appDat appLeft
+        e `shouldSatisfy` (not . null)
+        U.runApp appDat appLeft `shouldReturn` Left "Prelude.head: empty list"
+
+      it "should exception throwed" $ do
+        putStrLn "[INFO] 3件目の試験を実施"
+        appException `shouldThrow` anyException
+        appException `shouldThrow` errorCall "Prelude.head: empty list"
+
+
+
+-- |
+--
+app10 :: AppContext Int
+app10 = do
+  U.liftIOE $ print ("app called." :: String)
+  $logDebugS _LOG_SPEC "This is a debug log message"
+  return 10
+
+-- |
+--
+appLeft :: AppContext ()
+appLeft = do
+  U.liftIOE $ print $ head ""
+  return ()
+
+
+-- |
+--
+appException :: IO ()
+appException = print $ head ""
+
+
+
+{-# START_FILE test/Spec/{{name-as-module}}/Constant.hs #-}
+module Spec.{{name-as-module}}.Constant where
+
+import qualified Data.Text as T
+
+--------------------------------------------------------------------------------
+-- |
+--
+_LOG_SPEC :: T.Text
+_LOG_SPEC = T.pack "SPEC"
+
+
+
+
+{-# START_FILE ./LICENSE #-}
+Copyright Author name here (c) 2020
+
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+
+    * Redistributions in binary form must reproduce the above
+      copyright notice, this list of conditions and the following
+      disclaimer in the documentation and/or other materials provided
+      with the distribution.
+
+    * Neither the name of Author name here nor the names of other
+      contributors may be used to endorse or promote products derived
+      from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+{-# START_FILE ./README.md #-}
+# モナドでAppContext
+___全15回(2020.05-2020.07)___
+
+## 第1回 ☆初回☆ モナドでAppContext
+### ◇概要
+Haskellの動画連載シリーズ第3弾！！
+モナド変換を使って、アプリケーションコンテキストとなるモナドを作成してみます。
+今回は、Maybeモナドの振る舞いを見ていきましょう。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/oavuC8fEg1I/0.jpg)](https://youtu.be/oavuC8fEg1I)
+
+
+## 第2回 MaybeTでモナド変換
+### ◇概要
+今回は、MaybeTでIOとMaybeモナドを融合し、プリントデバッグしてみます。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/Ataaqr7MCMo/0.jpg)](https://youtu.be/Ataaqr7MCMo)
+
+
+## 第3回 EitherなのにExceptT?
+### ◇概要
+前回まで、Maybeモナドとそのモナド変換しをみてきましたが、AppContextとしては使いにくそうなので、今回は、Eitherモナドを見ていきたいと思います。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/GJ-44ZrFWxI/0.jpg)](https://youtu.be/GJ-44ZrFWxI)
+
+
+## 第4回 Applicationの雛形
+### ◇概要
+今回は、モジュール構成を整えつつ、アプリケーションコンテキストを使うかたちで、アプリ作成の雛型を用意しておきたいと思います。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/8G25kw1twsw/0.jpg)](https://youtu.be/8G25kw1twsw)
+
+
+
+## 第5回 MonadLoggerでロギング
+### ◇概要
+今回は、プリントデバッグしていた箇所を、ロギングできるようにして、ログ出力していきたいと思います。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/YRaWAX4vf9g/0.jpg)](https://youtu.be/YRaWAX4vf9g)
+
+
+
+## 第6回 大域変数を組み込む
+### ◇概要
+今回は、ReaderTにより、読み取り専用のグローバル変数をAppContextに組み込みたいと思います。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/jsujZhd1YBk/0.jpg)](https://youtu.be/jsujZhd1YBk)
+
+
+## 第7回 ReaderTにMVarって!?
+### ◇概要
+今回は、若干、反則なような気がしますが、ReaderTに、MVarを持たせて、値の書き換えやってしまいます。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/nrWthpU9IBc/0.jpg)](https://youtu.be/nrWthpU9IBc)
+
+
+## 第8回 ReaderT + StateT
+### ◇概要
+今回は、変更可能なデータを扱う方法として、StateTを見ていきたいと思います。
+
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/NAQB4ne3KZI/0.jpg)](https://youtu.be/NAQB4ne3KZI)
+
+
+## 第9回 オブジェクトの隔離
+### ◇概要
+今回は、閑話です。
+AppContextを、若干、むりやり、オブジェクト指向にこじつけてみます。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/svdabZ8Q1RM/0.jpg)](https://youtu.be/svdabZ8Q1RM)
+
+
+## 第10回 実行時引数の取込み
+### ◇概要
+今回から、数回にわたって、アプリに必要な機能を取り込んでいきたいと思います。
+まずは、実行時引数の取込みです。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/OdyXNQhYUV4/0.jpg)](https://youtu.be/OdyXNQhYUV4)
+
+
+## 第11回 設定ファイルの取込み
+### ◇概要
+前回は、実行時引数で、設定ファイルを指定できるようにしましたので、
+今回は、その設定ファイルを読み込んでいきましょう。
+### ◇動画
+[![hs-state-pattern](http://img.youtube.com/vi/tq5zjfxdNzI/0.jpg)](https://youtu.be/tq5zjfxdNzI)
+
+
+
+
+
+{-# START_FILE ./ChangeLog.md #-}
+# Changelog for {{name}}
+
+## Unreleased changes
+
+
