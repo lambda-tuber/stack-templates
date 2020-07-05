@@ -77,20 +77,17 @@ dependencies:
 - data-default
 - aeson
 - yaml
-- conduit
 - bytestring
 - text
-- monad-logger
-- fast-logger
+- hslogger
 - mtl
-- monad-control
-- lifted-base
-- transformers-base
+#- extensible
+#- extensible-skeleton
 
 library:
   source-dirs: src
   # exposed-modules:
-  # - {{name-as-module}}.Control
+  #   - {{name-as-module}}.Control
 
 executables:
   {{name}}:
@@ -192,9 +189,8 @@ module {{name-as-module}}.Application (
     app
   ) where
 
-import Control.Monad.Logger
 import Control.Monad.Reader
-import qualified Data.Text as T
+import qualified System.Log.Logger as L
 
 import {{name-as-module}}.Type
 import {{name-as-module}}.Constant
@@ -205,12 +201,13 @@ import qualified {{name-as-module}}.Utility as U
 --
 app :: AppContext ()
 app = do
-  lv <- _logLevelAppData <$> ask
   U.liftIOE $ print ("app called." :: String)
-  $logDebugS _LOG_APP "This is a debug log message"
-  $logInfoS  _LOG_APP "This is a info log message"
-  $logWarnS  _LOG_APP "This is a warn log message"
-  $logErrorS _LOG_APP $ "This is a error log message" `T.append` T.pack (show lv)
+
+  lv <- _logLevelAppData <$> ask
+  U.liftIOE $ L.debugM   _LOG_APP "This is a debug log message"
+  U.liftIOE $ L.infoM    _LOG_APP "This is a info log message"
+  U.liftIOE $ L.warningM _LOG_APP "This is a warn log message"
+  U.liftIOE $ L.errorM   _LOG_APP $ "This is a error log message. " ++ show lv
 
   return ()
 
@@ -218,22 +215,21 @@ app = do
 {-# START_FILE src/{{name-as-module}}/Constant.hs #-}
 module {{name-as-module}}.Constant where
 
-import qualified Data.Text as T
-import qualified Data.ByteString as B
-import qualified Data.Text.Encoding as T
-
 --------------------------------------------------------------------------------
 -- |
 --
-_LOG_APP :: T.Text
-_LOG_APP = T.pack "APP"
-
+_LOG_APP :: String
+_LOG_APP = "APP"
 
 -- |
 --
-_TIME_FORMAT :: B.ByteString
-_TIME_FORMAT = T.encodeUtf8 $ T.pack "%Y/%m/%d %T %z"
+_LOG_FORMAT :: String
+_LOG_FORMAT = "$time [$pid($tid)] $prio $loggername - $msg"
 
+-- |
+--
+_LOG_FORMAT_DATE :: String
+_LOG_FORMAT_DATE = "%Y-%m-%d %H:%M:%S.%q"
 
 
 {-# START_FILE src/{{name-as-module}}/Control.hs #-}
@@ -249,10 +245,8 @@ import qualified Control.Exception.Safe as E
 import Data.Default
 import Data.Yaml
 import Control.Lens
-import System.Log.FastLogger
 
 import {{name-as-module}}.Type
-import {{name-as-module}}.Constant
 import qualified {{name-as-module}}.Utility as U
 import qualified {{name-as-module}}.Application as A
 
@@ -263,22 +257,15 @@ run args = do
 
   conf <- maybe (pure def) decodeFileThrow (args^.yamlArgData)
 
-  tcache <- newTimeCache _TIME_FORMAT
-  (logger, finalizeLogger) <- newTimedFastLogger tcache 
-                            $ LogFileNoRotate (conf^.logFileConfigData) defaultBufSize
+  U.setupLogger (conf^.logLevelConfigData) (conf^.logFileConfigData)
 
   let appDat = AppData {
-      _loggerAppData   = logger
-    , _logLevelAppData = conf^.logLevelConfigData
+      _logLevelAppData = conf^.logLevelConfigData
     }
 
   U.runApp appDat A.app >>= \case
     Right _ -> return ()
     Left er -> E.throwString er
-
-  finalizeLogger
-
-  return ()
 
 
 
@@ -292,28 +279,31 @@ import Data.Default
 import Control.Lens
 import Data.Aeson
 import Data.Aeson.TH
-import Control.Monad.Reader
-import Control.Monad.Logger
-import Control.Monad.Except
-import System.Log.FastLogger
+import qualified Data.Extensible as EX
+import qualified Data.Extensible.Effect as EX
+import qualified Data.Extensible.Effect.Default as EX
+import qualified System.Log.Logger as L
 import qualified Data.Text as T
 import qualified Text.Read as R
 
 --------------------------------------------------------------------------------
 -- |
 --
-instance FromJSON LogLevel where
-  parseJSON (String v) = case R.readEither ("Level" ++ T.unpack v) of
+instance FromJSON L.Priority where
+  parseJSON (String v) = case R.readEither (T.unpack v) of
     Right l -> pure l
     Left er -> error $ "invalid loglevel. <" ++ T.unpack v ++ "> " ++ er
   parseJSON o = error $ "json parse error. Priority:" ++ show o
 
-instance ToJSON LogLevel where
-  toJSON LevelDebug     = String $ T.pack "Debug"
-  toJSON (LevelInfo)    = String $ T.pack "Info"
-  toJSON (LevelWarn)    = String $ T.pack "Warn"
-  toJSON (LevelError)   = String $ T.pack "Error"
-  toJSON (LevelOther m) = String m
+instance ToJSON L.Priority where
+  toJSON (L.DEBUG)     = String $ T.pack "DEBUG"
+  toJSON (L.INFO)      = String $ T.pack "INFO"
+  toJSON (L.NOTICE)    = String $ T.pack "NOTICE"
+  toJSON (L.WARNING)   = String $ T.pack "WARNING"
+  toJSON (L.ERROR)     = String $ T.pack "ERROR"
+  toJSON (L.CRITICAL)  = String $ T.pack "CRITICAL"
+  toJSON (L.ALERT)     = String $ T.pack "ALERT"
+  toJSON (L.EMERGENCY) = String $ T.pack "EMERGENCY"
 
 
 --------------------------------------------------------------------------------
@@ -340,8 +330,8 @@ instance Default ArgData where
 -- |
 --
 data ConfigData = ConfigData {
-    _logFileConfigData :: FilePath
-  , _logLevelConfigData :: LogLevel
+    _logFileConfigData  :: FilePath
+  , _logLevelConfigData :: L.Priority
   } deriving (Typeable, Show, Read, Eq)
 
 makeLenses ''ConfigData
@@ -354,7 +344,7 @@ $(deriveJSON
 instance Default ConfigData where
   def = ConfigData {
         _logFileConfigData  = "{{name}}.log"
-      , _logLevelConfigData = LevelWarn
+      , _logLevelConfigData = L.WARNING
       }
 
 
@@ -362,18 +352,25 @@ instance Default ConfigData where
 -- |
 --
 data AppData = AppData {
-    _loggerAppData   :: TimedFastLogger
-  , _logLevelAppData :: LogLevel
+    _logLevelAppData :: L.Priority
   }
 
 makeLenses ''AppData
 
+instance Default AppData where
+  def = AppData {
+        _logLevelAppData = L.WARNING
+      }
 
 --------------------------------------------------------------------------------
 -- |
 --
 type ErrorData = String
-type AppContext = ReaderT AppData (ExceptT ErrorData (LoggingT IO))
+type AppContext r = EX.Eff '[
+                     EX.ReaderDef AppData
+                   , EX.EitherDef ErrorData
+                   , "IO" EX.>: IO
+                   ] r
 
 
 
@@ -382,52 +379,28 @@ type AppContext = ReaderT AppData (ExceptT ErrorData (LoggingT IO))
 
 module {{name-as-module}}.Utility where
 
-import System.Log.FastLogger
-import Control.Monad.Logger
 import qualified Control.Exception.Safe as E
 import Control.Monad.IO.Class
 import Control.Monad.Except
-import Control.Monad.Reader
-import Control.Lens
+import qualified Data.Extensible.Effect as EX
+import qualified Data.Extensible.Effect.Default as EX
+import qualified System.Log.Logger as L
+import qualified System.Log.Formatter as L
+import qualified System.Log.Handler as LH
+import qualified System.Log.Handler.Simple as LHS
+import System.IO
 
 import {{name-as-module}}.Type
+import {{name-as-module}}.Constant
 
 
 -- |
 --
 runApp :: AppData -> AppContext a -> IO (Either ErrorData a)
-runApp appDat app =
-  runFastLoggerT appDat
-    $ runExceptT
-    $ runReaderT app appDat
-
-
--- |
---
-runFastLoggerT :: AppData -> LoggingT IO a -> IO a
-runFastLoggerT appDat app = do
-  let logLevel = appDat^.logLevelAppData
-      logger   = appDat^.loggerAppData
-      
-  runLoggingT (filterLogger (filterByLevel logLevel) app) $ output logger 
-
-  where
-    -- |
-    --
-    output :: TimedFastLogger
-           -> Loc
-           -> LogSource
-           -> LogLevel
-           -> LogStr
-           -> IO ()
-    output logger a b c d = do
-      let msg = defaultLogStr a b c d
-      logger (\ts -> toLogStr ts <> " " <> msg)
-
-    -- |
-    --
-    filterByLevel :: LogLevel -> LogSource -> LogLevel -> Bool
-    filterByLevel target _ actual = actual >= target
+runApp appDat =
+  EX.retractEff
+  . EX.runEitherDef
+  . flip EX.runReaderDef appDat
 
 
 -- |
@@ -442,6 +415,27 @@ liftIOE f = liftIO (go f) >>= liftEither
     errHdl = return . Left . show
 
 
+-- |
+--
+setupLogger :: L.Priority -> FilePath -> IO ()
+setupLogger lv path = do
+
+  logStream <- openFile path AppendMode
+  hSetEncoding logStream utf8
+
+  logH <- LHS.streamHandler logStream lv
+
+  let logHandle  = logH {LHS.closeFunc = hClose}
+      logFormat  = L.tfLogFormatter _LOG_FORMAT_DATE _LOG_FORMAT
+      logHandler = LH.setFormatter logHandle logFormat
+
+  L.updateGlobalLogger L.rootLoggerName $ L.setHandlers ([] :: [LHS.GenericHandler Handle])
+  L.updateGlobalLogger _LOG_APP $ L.setHandlers [logHandler]
+  L.updateGlobalLogger _LOG_APP $ L.setLevel lv
+
+
+
+
 {-# START_FILE test/Spec.hs #-}
 {-# OPTIONS_GHC -F -pgmF hspec-discover #-}
 
@@ -452,13 +446,12 @@ liftIOE f = liftIO (go f) >>= liftEither
 module {{name-as-module}}.UtilitySpec (spec) where
 
 import Test.Hspec
-import Control.Monad.Logger
-import System.Log.FastLogger
+import Data.Default
+import qualified System.Log.Logger as L
 
 import Spec.{{name-as-module}}.Constant
 
 import {{name-as-module}}.Type
-import {{name-as-module}}.Constant
 import qualified {{name-as-module}}.Utility as U
 
 
@@ -495,29 +488,22 @@ spec = do
 run :: Spec
 run = do
   describe "runApp" $ do
-    tcache <- runIO $ newTimeCache _TIME_FORMAT
-    (logger, _) <- runIO $ newTimedFastLogger tcache (LogStderr defaultBufSize)
-    let appDat = AppData {
-        _loggerAppData   = logger
-      , _logLevelAppData = LevelDebug
-      }
-
     context "when AppData default" $ do
       it "should be 10" $ do
         putStrLn "[INFO] 1件目の試験を実施"
         let expect = 10
 
-        (Right actual) <- U.runApp appDat app10
+        (Right actual) <- U.runApp def app10
 
         expect `shouldBe` actual
 
       it "should exception catched" $ do
         putStrLn "[INFO] 2件目の試験を実施"
 
-        (Left actual) <- U.runApp appDat appLeft
+        (Left actual) <- U.runApp def appLeft
 
         actual `shouldSatisfy` (not . null)
-        U.runApp appDat appLeft `shouldReturn` Left "Prelude.head: empty list"
+        U.runApp def appLeft `shouldReturn` Left "Prelude.head: empty list"
 
       it "should exception throwed" $ do
         putStrLn "[INFO] 3件目の試験を実施"
@@ -532,8 +518,9 @@ run = do
 app10 :: AppContext Int
 app10 = do
   U.liftIOE $ print ("app called." :: String)
-  $logDebugS _LOG_SPEC "This is a debug log message"
+  U.liftIOE $ L.debugM  _LOG_SPEC "This is a debug log message"
   return 10
+
 
 -- |
 --
@@ -553,13 +540,11 @@ appException = print $ head ""
 {-# START_FILE test/Spec/{{name-as-module}}/Constant.hs #-}
 module Spec.{{name-as-module}}.Constant where
 
-import qualified Data.Text as T
-
 --------------------------------------------------------------------------------
 -- |
 --
-_LOG_SPEC :: T.Text
-_LOG_SPEC = T.pack "SPEC"
+_LOG_SPEC :: String
+_LOG_SPEC = "SPEC"
 
 
 
@@ -598,114 +583,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 {-# START_FILE ./README.md #-}
-# モナドでAppContext
-___全15回予定(2020.05-2020.07)___
-
-第13回で、Stackテンプレートの使い方を紹介しています。  
-先に、お手元に、AppContextのプロジェクトを作成してからビデオを観て頂く方が、
-コードが追っかけやすいと思います。
-
-
-## 第1回 ☆初回☆ モナドでAppContext
-### ◇概要
-Haskellの動画連載シリーズ第3弾！！
-モナド変換を使って、アプリケーションコンテキストとなるモナドを作成してみます。
-今回は、Maybeモナドの振る舞いを見ていきましょう。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/oavuC8fEg1I/0.jpg)](https://youtu.be/oavuC8fEg1I)
-
-
-## 第2回 MaybeTでモナド変換
-### ◇概要
-今回は、MaybeTでIOとMaybeモナドを融合し、プリントデバッグしてみます。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/Ataaqr7MCMo/0.jpg)](https://youtu.be/Ataaqr7MCMo)
-
-
-## 第3回 EitherなのにExceptT?
-### ◇概要
-前回まで、Maybeモナドとそのモナド変換しをみてきましたが、AppContextとしては使いにくそうなので、今回は、Eitherモナドを見ていきたいと思います。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/GJ-44ZrFWxI/0.jpg)](https://youtu.be/GJ-44ZrFWxI)
-
-
-## 第4回 Applicationの雛形
-### ◇概要
-今回は、モジュール構成を整えつつ、アプリケーションコンテキストを使うかたちで、アプリ作成の雛型を用意しておきたいと思います。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/8G25kw1twsw/0.jpg)](https://youtu.be/8G25kw1twsw)
-
-
-
-## 第5回 MonadLoggerでロギング
-### ◇概要
-今回は、プリントデバッグしていた箇所を、ロギングできるようにして、ログ出力していきたいと思います。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/YRaWAX4vf9g/0.jpg)](https://youtu.be/YRaWAX4vf9g)
-
-
-
-## 第6回 大域変数を組み込む
-### ◇概要
-今回は、ReaderTにより、読み取り専用のグローバル変数をAppContextに組み込みたいと思います。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/jsujZhd1YBk/0.jpg)](https://youtu.be/jsujZhd1YBk)
-
-
-## 第7回 ReaderTにMVarって!?
-### ◇概要
-今回は、若干、反則なような気がしますが、ReaderTに、MVarを持たせて、値の書き換えやってしまいます。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/nrWthpU9IBc/0.jpg)](https://youtu.be/nrWthpU9IBc)
-
-
-## 第8回 ReaderT + StateT
-### ◇概要
-今回は、変更可能なデータを扱う方法として、StateTを見ていきたいと思います。
-
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/NAQB4ne3KZI/0.jpg)](https://youtu.be/NAQB4ne3KZI)
-
-
-## 第9回 オブジェクトの隔離
-### ◇概要
-今回は、閑話です。
-AppContextを、若干、むりやり、オブジェクト指向にこじつけてみます。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/svdabZ8Q1RM/0.jpg)](https://youtu.be/svdabZ8Q1RM)
-
-
-## 第10回 実行時引数の取込み
-### ◇概要
-今回から、数回にわたって、アプリに必要な機能を取り込んでいきたいと思います。
-まずは、実行時引数の取込みです。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/OdyXNQhYUV4/0.jpg)](https://youtu.be/OdyXNQhYUV4)
-
-
-## 第11回 設定ファイルの取込み
-### ◇概要
-前回は、実行時引数で、設定ファイルを指定できるようにしましたので、
-今回は、その設定ファイルを読み込んでいきましょう。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/tq5zjfxdNzI/0.jpg)](https://youtu.be/tq5zjfxdNzI)
-
-
-## 第12回  HSpecによる試験環境
-### ◇概要
-今回は、HSpecの試験環境を準備してみたいと思います。
-早速、コーディングしていきましょう。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/Vy9yrByf7F4/0.jpg)](https://youtu.be/Vy9yrByf7F4)
-
-
-## 第13回Stack Templateの準備
-### ◇概要
-今回は、これまでつくってきたアプリケーションコンテキストを、GitHubにおきましたのでリポジトリを紹介します。
-### ◇動画
-[![hs-state-pattern](http://img.youtube.com/vi/fekb301oyKg/0.jpg)](https://youtu.be/fekb301oyKg)
-
-
+# {{name}}
 
 
 {-# START_FILE ./ChangeLog.md #-}
