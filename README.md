@@ -9,7 +9,7 @@
 
 
 # app.hsfiles
-詳細は、モナドでAppContextの[第14回](https://youtu.be/fekb301oyKg)を参照ください。  
+詳細は、モナドでAppContextの[第14回](https://youtu.be/8ze1ZAXahDg)を参照ください。  
 次のコマンドで、このテンプレートを利用できます。
 
 ```
@@ -18,7 +18,7 @@
 
 
 # eff.hsfiles
-詳細は、モナドでAppContext[第15回](https://youtu.be/8ze1ZAXahDg)を参照ください。  
+詳細は、モナドでAppContext[第15回](https://youtu.be/ZT64halRc5M)を参照ください。  
 次のコマンドで、このテンプレートを利用できます。
 
 ```
