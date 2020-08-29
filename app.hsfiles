@@ -126,7 +126,7 @@ module Main where
 import System.Exit
 import Options.Applicative
 import qualified Control.Exception.Safe as E
-import Paths_{{name}} (version)
+import Paths_{{name-as-varid}} (version)
 import Data.Version (showVersion)
 
 import {{name-as-module}}.Control
